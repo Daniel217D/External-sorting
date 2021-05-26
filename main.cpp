@@ -4,9 +4,10 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
-#include <Windows.h>
+#include <windows.h>
 
 using std::cout;
+using std::swap;
 using std::string;
 using std::fstream;
 using std::ifstream;
@@ -70,14 +71,23 @@ void closeAll(FileData *files, const int &amountOfFiles) {
     }
 }
 
-bool isEndOfTempFiles(FileData *files, const int &from, const int &to) {
-    bool isEnd = true;
-
-    for (int i = from; i < to && isEnd; ++i) {
-        isEnd = files[i].eof;
+int findEndOfTempFiles(FileData *files, const int &from, const int &to) {
+    int firstEmpty = to;
+    
+    for (int i = to - 1; i >= from && firstEmpty == to; --i) {
+        if(files[i].eof) {
+            firstEmpty = i;
+        }    
     }
 
-    return isEnd;
+    for (int i = from; i < firstEmpty; ++i) {
+        if(files[i].eof) {
+            swap(files[i], files[firstEmpty - 1]);
+            firstEmpty--;
+        }
+    }
+    
+    return files[0].eof ? -1 : firstEmpty;
 }
 
 bool isEndOfTempSequences(FileData *files, const int &from, const int &to) {
@@ -126,60 +136,41 @@ void distribution(FileData &mainFile, FileData *files, const int &amountOfFiles)
     closeAll(files, amountOfFiles);
 }
 
-bool merge(FileData *files, const int &amountOfFiles, bool isSwap) {
+bool merge(FileData *files, const int &amountOfFiles) {
     bool endOfSort = false;
 
     for (int i = 0; i < amountOfFiles; ++i) {
-        if (isSwap) {
-            openForWriting(files[i]);
-        } else {
-            openForReading(files[i]);
-        }
+        openForReading(files[i]);
     }
 
     for (int i = amountOfFiles; i < amountOfFiles * 2; ++i) {
-        if (isSwap) {
-            openForReading(files[i]);
-        } else {
-            openForWriting(files[i]);
-        }
+        openForWriting(files[i]);
     }
 
-    int copyToFileNum = isSwap ? 0 : amountOfFiles;
-    int checkFrom = isSwap ? amountOfFiles : 0;
-    int checkTo = isSwap ? amountOfFiles * 2 : amountOfFiles;
+    int copyToFileNum = amountOfFiles;
+    int amountOfNotEmptyFiles = amountOfFiles;
 
-    while (!isEndOfTempFiles(files, checkFrom, checkTo)) {
-        while (!isEndOfTempSequences(files, checkFrom, checkTo)) {
-            copyElement(minInSequences(files, checkFrom, checkTo), files[copyToFileNum]);
+    while (amountOfNotEmptyFiles != -1) {
+        while (!isEndOfTempSequences(files, 0, amountOfNotEmptyFiles)) {
+            copyElement(minInSequences(files, 0, amountOfNotEmptyFiles), files[copyToFileNum]);
         }
 
-        if (isSwap) {
-            for (int i = amountOfFiles; i < amountOfFiles * 2; ++i) {
-                files[i].eos = files[i].eof;
-            }
+        for (int i = 0; i < amountOfNotEmptyFiles; ++i) {
+            files[i].eos = files[i].eof;
+        }
 
-            if (copyToFileNum == amountOfFiles - 1) {
-                copyToFileNum = 0;
-            } else {
-                copyToFileNum++;
-            }
+        if (copyToFileNum == amountOfFiles * 2 - 1) {
+            copyToFileNum = amountOfFiles;
         } else {
-            for (int i = 0; i < amountOfFiles; ++i) {
-                files[i].eos = files[i].eof;
-            }
-
-            if (copyToFileNum == amountOfFiles * 2 - 1) {
-                copyToFileNum = amountOfFiles;
-            } else {
-                copyToFileNum++;
-            }
+            copyToFileNum++;
         }
+
+        amountOfNotEmptyFiles = findEndOfTempFiles(files, 0, amountOfNotEmptyFiles);
     }
 
     closeAll(files, amountOfFiles * 2);
 
-    FileData &secondFileInNextStep = isSwap ? files[1] : files[amountOfFiles + 1];
+    FileData &secondFileInNextStep = files[amountOfFiles + 1];
 
     secondFileInNextStep.file.open(secondFileInNextStep.filename);
 
@@ -193,7 +184,7 @@ bool merge(FileData *files, const int &amountOfFiles, bool isSwap) {
 }
 
 void sort(string source) {
-    const int amountOfActiveFiles = 100;
+    const int amountOfActiveFiles = 3;
     const int amountOfFiles = amountOfActiveFiles * 2;
 
     auto *files = new FileData[amountOfFiles];
@@ -207,18 +198,20 @@ void sort(string source) {
 
     distribution(mainFile, files, amountOfActiveFiles);
 
-    bool isSwap = false;
     bool end = false;
     int counter = 1;
 
     while (!end) {
         cout << counter++ << " merge\n";
 
-        end = merge(files, amountOfActiveFiles, isSwap);
-        isSwap = !isSwap;
+        end = merge(files, amountOfActiveFiles);
+
+        for (int i = 0; i < amountOfActiveFiles; ++i) {
+            swap(files[i], files[amountOfActiveFiles + i]);
+        }
     }
 
-    CopyFile((isSwap ? files[amountOfActiveFiles] : files[0]).filename.c_str(), source.c_str(), 0);
+    CopyFile(files[0].filename.c_str(), source.c_str(), 0);
 
     for (int i = 0; i < amountOfFiles; i++) {
         remove(("files/f" + to_string(i) + ".txt").c_str());
